@@ -84,6 +84,16 @@ pipeline {
       }
     }
 
+    stage('Validate Chrome') {
+      steps {
+        bat '''
+          echo Verifying Chrome setup...
+          where chrome.exe || (echo Chrome not found && exit /b 1)
+          where chromedriver.exe || (echo ChromeDriver not found && exit /b 1)
+        '''
+      }
+    }
+
     // -------------------------------------------------------------
     // Stage 3: Export RTM Report via Selenium
     // -------------------------------------------------------------

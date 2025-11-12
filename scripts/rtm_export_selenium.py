@@ -78,7 +78,8 @@ options.add_argument("--remote-debugging-port=9222")
 options.add_argument("--ignore-certificate-errors")
 
 # Optional profile (safe sandbox)
-profile_dir = r"C:\Temp\chrome-profile"
+profile_dir = r"C:\Users\I17270834\AppData\Local\Google\Chrome\User Data"
+
 os.makedirs(profile_dir, exist_ok=True)
 options.add_argument(f"--user-data-dir={profile_dir}")
 
