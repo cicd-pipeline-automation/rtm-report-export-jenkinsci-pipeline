@@ -34,7 +34,7 @@ pipeline {
     // --- Jira / RTM ---
     JIRA_BASE = credentials('jira-base')          // e.g. https://yourcompany.atlassian.net
     JIRA_USER = credentials('jira-user')
-    JIRA_PASS = credentials('jira-pass')
+    JIRA_PASS = credentials('jira-token')
 
     // --- Confluence ---
     CONFLUENCE_BASE  = credentials('confluence-base')
