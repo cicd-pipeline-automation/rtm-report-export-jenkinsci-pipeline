@@ -62,20 +62,56 @@ if not chrome_binary:
 print(f"[INFO] Chrome detected at: {chrome_binary}")
 
 # ------------------------------------------------------------------------------
-# Configure Chrome Options (Headless mode for Jenkins)
+# Configure Chrome Options (Jenkins-safe headless mode)
 # ------------------------------------------------------------------------------
 options = Options()
-options.binary_location = chrome_binary
-options.add_argument("--headless=new")
-options.add_argument("--disable-gpu")
-options.add_argument("--no-sandbox")
-options.add_argument("--disable-dev-shm-usage")
-options.add_argument("--disable-extensions")
-options.add_argument("--disable-notifications")
-options.add_argument("--disable-software-rasterizer")
+
+# 🧩 Core stability flags for Jenkins Windows environment
+options.add_argument("--headless=new")          # run headless (invisible)
+options.add_argument("--no-sandbox")            # bypass OS security sandbox
+options.add_argument("--disable-dev-shm-usage") # avoid shared memory crash
+options.add_argument("--disable-gpu")           # disable GPU rendering
 options.add_argument("--window-size=1920,1080")
-options.add_argument("--remote-debugging-port=9222")
+options.add_argument("--disable-software-rasterizer")
+options.add_argument("--disable-extensions")
 options.add_argument("--ignore-certificate-errors")
+options.add_argument("--remote-debugging-port=9222")
+options.add_argument("--disable-background-networking")
+options.add_argument("--disable-client-side-phishing-detection")
+options.add_argument("--disable-component-update")
+options.add_argument("--disable-default-apps")
+options.add_argument("--disable-popup-blocking")
+options.add_argument("--disable-sync")
+options.add_argument("--no-first-run")
+options.add_argument("--no-service-autorun")
+options.add_argument("--password-store=basic")
+options.add_argument("--use-mock-keychain")
+
+# 🧩 OPTIONAL — if SSO is used, enable Chrome profile reuse
+# Comment this line if you don’t need a logged-in profile
+options.add_argument(r"user-data-dir=C:\Users\I17270834\AppData\Local\Google\Chrome\User Data")
+
+# 🧩 Set Chrome binary explicitly (avoid PATH issues)
+chrome_binary = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+options.binary_location = chrome_binary
+
+prefs = {
+    "download.default_directory": str(outdir.resolve()),
+    "download.prompt_for_download": False,
+    "download.directory_upgrade": True,
+    "safebrowsing.enabled": True,
+    "profile.default_content_settings.popups": 0,
+    "plugins.always_open_pdf_externally": True
+}
+options.add_experimental_option("prefs", prefs)
+
+print(f"[INFO] Chrome binary set to: {chrome_binary}")
+
+# Initialize WebDriver safely
+from selenium.webdriver.chrome.service import Service
+service = Service(r"C:\tools\chromedriver\chromedriver-win64\chromedriver.exe")
+
+driver = webdriver.Chrome(service=service, options=options)
 
 # Optional profile (safe sandbox)
 profile_dir = r"C:\Users\I17270834\AppData\Local\Google\Chrome\User Data"
