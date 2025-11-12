@@ -2,13 +2,12 @@
 """
 RTM Test Execution Report Export Automation (Stable Jenkins Edition)
 --------------------------------------------------------------------
-This script logs into Jira Cloud (with RTM plugin), navigates to the Test
-Execution report, exports it as PDF, and saves it under /report folder.
+Automates Jira RTM Test Execution report export to PDF.
 
-Compatible with:
-  - Jenkins running on Windows using 'java -jar jenkins.war'
-  - Chrome installed system-wide (Program Files or Program Files (x86))
-  - Headless Chrome execution
+✅ Compatible with:
+  - Jenkins on Windows (launched via 'java -jar jenkins.war')
+  - Chrome installed system-wide
+  - Headless execution for CI pipelines
 
 Author: DevOps Automation (RTM Report Export)
 """
@@ -19,10 +18,11 @@ import time
 import pathlib
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+
 
 # ------------------------------------------------------------------------------
 # Environment Variables (provided by Jenkins)
@@ -34,11 +34,13 @@ PROJECT_KEY = os.getenv("RTM_PROJECT")
 TEST_EXEC = os.getenv("TEST_EXECUTION")
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "report")
 
+
 # ------------------------------------------------------------------------------
 # Directory Setup
 # ------------------------------------------------------------------------------
 outdir = pathlib.Path(DOWNLOAD_DIR)
 outdir.mkdir(parents=True, exist_ok=True)
+
 
 # ------------------------------------------------------------------------------
 # Detect Chrome installation path
@@ -49,94 +51,74 @@ CHROME_PATHS = [
     rf"C:\Users\{os.getenv('USERNAME')}\AppData\Local\Google\Chrome\Application\chrome.exe",
 ]
 
-chrome_binary = None
-for path in CHROME_PATHS:
-    if os.path.exists(path):
-        chrome_binary = path
-        break
-
+chrome_binary = next((p for p in CHROME_PATHS if os.path.exists(p)), None)
 if not chrome_binary:
     print("[ERROR] Google Chrome not found. Please install Chrome or update path.")
     sys.exit(1)
 
 print(f"[INFO] Chrome detected at: {chrome_binary}")
 
+
 # ------------------------------------------------------------------------------
-# Configure Chrome Options (Jenkins-safe headless mode)
+# Configure Chrome Options (stable headless mode for Jenkins)
 # ------------------------------------------------------------------------------
 options = Options()
 
 # 🧩 Core stability flags for Jenkins Windows environment
-options.add_argument("--headless=new")          # run headless (invisible)
-options.add_argument("--no-sandbox")            # bypass OS security sandbox
-options.add_argument("--disable-dev-shm-usage") # avoid shared memory crash
+options.add_argument("--headless=new")          # run headless
+options.add_argument("--no-sandbox")            # bypass OS sandbox
+options.add_argument("--disable-dev-shm-usage") # fix shared memory crash
 options.add_argument("--disable-gpu")           # disable GPU rendering
-options.add_argument("--window-size=1920,1080")
 options.add_argument("--disable-software-rasterizer")
 options.add_argument("--disable-extensions")
-options.add_argument("--ignore-certificate-errors")
-options.add_argument("--remote-debugging-port=9222")
+options.add_argument("--disable-popup-blocking")
 options.add_argument("--disable-background-networking")
 options.add_argument("--disable-client-side-phishing-detection")
 options.add_argument("--disable-component-update")
 options.add_argument("--disable-default-apps")
-options.add_argument("--disable-popup-blocking")
 options.add_argument("--disable-sync")
 options.add_argument("--no-first-run")
 options.add_argument("--no-service-autorun")
 options.add_argument("--password-store=basic")
 options.add_argument("--use-mock-keychain")
+options.add_argument("--window-size=1920,1080")
+options.add_argument("--remote-debugging-port=9222")
+options.add_argument("--single-process")
+options.add_argument("--ignore-certificate-errors")
 
-# 🧩 OPTIONAL — if SSO is used, enable Chrome profile reuse
-# Comment this line if you don’t need a logged-in profile
+# Optional: use Chrome profile (for SSO logins)
 options.add_argument(r"user-data-dir=C:\Users\I17270834\AppData\Local\Google\Chrome\User Data")
 
-# 🧩 Set Chrome binary explicitly (avoid PATH issues)
-chrome_binary = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+# Set Chrome binary
 options.binary_location = chrome_binary
 
+# Set download preferences
 prefs = {
     "download.default_directory": str(outdir.resolve()),
     "download.prompt_for_download": False,
     "download.directory_upgrade": True,
     "safebrowsing.enabled": True,
-    "profile.default_content_settings.popups": 0,
     "plugins.always_open_pdf_externally": True
 }
 options.add_experimental_option("prefs", prefs)
 
-print(f"[INFO] Chrome binary set to: {chrome_binary}")
+print(f"[INFO] Chrome binary set to: {options.binary_location}")
 
-# Initialize WebDriver safely
-from selenium.webdriver.chrome.service import Service
+# Define ChromeDriver service path
 service = Service(r"C:\tools\chromedriver\chromedriver-win64\chromedriver.exe")
 
-driver = webdriver.Chrome(service=service, options=options)
-
-# Optional profile (safe sandbox)
-profile_dir = r"C:\Users\I17270834\AppData\Local\Google\Chrome\User Data"
-
-os.makedirs(profile_dir, exist_ok=True)
-options.add_argument(f"--user-data-dir={profile_dir}")
-
-prefs = {
-    "download.default_directory": str(outdir.resolve()),
-    "download.prompt_for_download": False,
-    "download.directory_upgrade": True,
-    "safebrowsing.enabled": True
-}
-options.add_experimental_option("prefs", prefs)
 
 # ------------------------------------------------------------------------------
-# Initialize ChromeDriver
+# Start Chrome
 # ------------------------------------------------------------------------------
 try:
-    driver = webdriver.Chrome(options=options)
+    driver = webdriver.Chrome(service=service, options=options)
     wait = WebDriverWait(driver, 30)
     print("[INFO] Chrome started successfully.")
 except Exception as e:
     print(f"[ERROR] Chrome startup failed: {e}")
     sys.exit(1)
+
 
 # ------------------------------------------------------------------------------
 # Jira Login and RTM Export
@@ -157,7 +139,7 @@ try:
             username_box.send_keys(JIRA_USER)
             print("[INFO] Username entered.")
 
-            # Next/Continue
+            # Continue
             try:
                 driver.find_element(By.ID, "login-submit").click()
             except:
@@ -172,7 +154,7 @@ try:
             password_box.send_keys(JIRA_PASS)
             print("[INFO] Password entered.")
 
-            # Log in
+            # Login
             try:
                 driver.find_element(By.ID, "login-submit").click()
             except:
