@@ -166,7 +166,7 @@ pipeline {
          * Stage 5: Publish to Confluence
          ***********************/
         stage('Publish to Confluence') {
-           when { expression { fileExists('rtm_report.html') } }
+           //when { expression { fileExists('rtm_report.html') } }
             steps {
                 echo "🌐 Publishing RTM report to Confluence space..."
                 bat """
@@ -180,7 +180,7 @@ pipeline {
          * Stage 6: Email Notification
          ***********************/
         stage('Send Email Notification') {
-           when { expression { fileExists('rtm_report.pdf') } }
+           //when { expression { fileExists('rtm_report.pdf') } }
             steps {
                 echo "📧 Sending RTM report via email..."
                 bat """
