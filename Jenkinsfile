@@ -34,7 +34,7 @@ pipeline {
         )
         string(
             name: 'EMAIL_TO',
-            defaultValue: 'qa-team@example.com,dev-lead@example.com',
+            defaultValue: 'devopsuser8413@gmail.com,ru85206315@gmail.com,ruser3015@gmail.com',
             description: 'Comma or semicolon separated list of recipients'
         )
         string(
@@ -77,8 +77,8 @@ pipeline {
         SMTP_HOST      = credentials('smtp-host')
         SMTP_PORT      = '587'
         SMTP_USER      = credentials('smtp-user')
-        SMTP_PASSWORD  = credentials('smtp-password')
-        EMAIL_FROM     = credentials('smtp-from')
+        SMTP_PASSWORD  = credentials('smtp-pass')
+        EMAIL_FROM     = credentials('sender-email')
         EMAIL_TO       = "${params.EMAIL_TO}"   // multiple receivers supported
 
         // 🔹 Misc
