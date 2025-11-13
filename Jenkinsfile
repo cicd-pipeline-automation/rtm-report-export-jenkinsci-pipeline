@@ -198,7 +198,6 @@ pipeline {
         always {
             echo "📘 Jenkins workspace: ${env.WORKSPACE}"
             echo "🧹 Cleaning temporary files..."
-            cleanWs()
         }
         success {
             echo "✅ RTM Report Export & Publishing Pipeline completed successfully!"
