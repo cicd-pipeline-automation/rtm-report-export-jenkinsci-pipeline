@@ -1,17 +1,13 @@
 # ================================================================
-# 🧾 RTM Automation – Full Pipeline Dependencies
+# 🧾 RTM Automation – Minimal Pipeline Dependencies
 # ------------------------------------------------
 # Supports:
-#   1️⃣ fetch_rtm_data.py           (Jira RTM API integration)
-#   2️⃣ generate_rtm_report.py      (HTML/PDF report generation)
-#   3️⃣ confluence_publish.py       (Confluence REST API upload)
-#   4️⃣ send_email.py               (SMTP email notification)
-#   5️⃣ rtm_export_selenium.py      (optional – Selenium browser automation)
+#   ✅ fetch_rtm_data.py        (Jira RTM API integration)
+#   ✅ generate_rtm_report.py   (HTML/PDF report generation)
+#   ✅ confluence_publish.py    (Confluence REST API upload)
+#   ✅ send_email.py            (SMTP email notification)
 #
-# Tested Environment:
-#   Python >= 3.10
-#   Jenkins Windows (java -jar jenkins.war)
-#   Chrome/Chromedriver >= 130.x
+# 🚀 Optimized for speed and lightweight builds
 # ================================================================
 
 # --------------------------
@@ -21,31 +17,20 @@ requests==2.32.3
 certifi>=2024.7.4
 
 # --------------------------
-# 📊 Data & Report Formatting
+# 📄 Report Generation
 # --------------------------
 tabulate==0.9.0
 fpdf2==2.8.1
 
 # --------------------------
-# 🧠 Automation & Web Drivers
+# 🧰 Core Utilities
 # --------------------------
-selenium==4.38.0   # Used by rtm_export_selenium.py for browser-based RTM export
-
-# --------------------------
-# ⚙️ Spreadsheet Handling (optional)
-# --------------------------
-pandas==2.2.3
-openpyxl==3.1.5
-
-# --------------------------
-# 🧰 Utility Libraries
-# --------------------------
-typing_extensions>=4.10.0
 urllib3>=2.0.7
 
 # ================================================================
-# Notes:
-#   • Keep all dependencies pinned to ensure reproducible builds.
-#   • Use “python -m venv .venv && .venv\Scripts\pip install -r requirements.txt”
-#     when initializing Jenkins virtual environments.
+# 💡 Notes:
+# • Removed pandas, openpyxl, selenium to speed up pipeline setup.
+# • Suitable for headless, non-GUI Jenkins pipelines.
+# • Recreate venv each time with:
+#     python -m venv .venv && .venv\Scripts\pip install -r requirements.txt
 # ================================================================
