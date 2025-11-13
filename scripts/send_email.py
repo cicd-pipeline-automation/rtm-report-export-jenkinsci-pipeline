@@ -1,178 +1,175 @@
 #!/usr/bin/env python3
-"""
-====================================================================================
-📧 Email Notification – RTM Report Automation (Production-Ready)
-------------------------------------------------------------------------------------
-Sends RTM HTML & PDF reports via SMTP to stakeholders.
+# ==========================================================
+# ✉ send_email.py
+# Purpose: Send RTM report by SMTP to multiple recipients
+#          (HTML body + HTML/PDF attachments)
+# ==========================================================
 
-✅ Secure SMTP authentication (App Passwords / Jenkins credentials)
-✅ MIME multipart email (HTML + PDF attachments)
-✅ Includes Confluence page link
-✅ Works seamlessly on Jenkins Windows/Linux agents
-✅ Retries transient SMTP errors and logs all activity
-
-Author  : DevOpsUser8413
-Version : 1.1.0
-====================================================================================
-"""
-
+import json
 import os
-import sys
 import smtplib
+import sys
 import traceback
-from time import sleep
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+from email.header import Header
 from email.mime.application import MIMEApplication
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from pathlib import Path
-from datetime import datetime
+from typing import List
 
-# ---------------------------------------------------------------------------
-# 🌍 Environment Variables (Injected by Jenkins)
-# ---------------------------------------------------------------------------
-SMTP_HOST       = os.getenv("SMTP_HOST")
-SMTP_PORT       = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USER       = os.getenv("SMTP_USER")
-SMTP_PASS       = os.getenv("SMTP_PASS")
-REPORT_FROM     = os.getenv("REPORT_FROM", SMTP_USER)
-REPORT_TO       = os.getenv("REPORT_TO", "")       # Comma-separated list
-REPORT_CC       = os.getenv("REPORT_CC", "")       # Optional CC list
-REPORT_BCC      = os.getenv("REPORT_BCC", "")      # Optional BCC list
-CONFLUENCE_LINK = os.getenv("CONFLUENCE_LINK", "https://confluence.yourorg.com/display/RTM/RTM+Test+Execution+Report")
 
-HTML_REPORT = Path("report/rtm_report.html")
-PDF_REPORT  = Path("report/rtm_report.pdf")
-LOG_FILE    = Path("report/email_notification_log.txt")
+def env(name, default=None, required=False):
+    value = os.getenv(name, default)
+    if required and (value is None or str(value).strip() == ""):
+        print(f"[ERROR] Missing required environment variable: {name}", file=sys.stderr)
+        sys.exit(2)
+    return value
 
-# ---------------------------------------------------------------------------
-# 🧾 Logging Utility
-# ---------------------------------------------------------------------------
-def log(message: str, level: str = "INFO") -> None:
-    """Prints and writes log messages with timestamps."""
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{level}] {ts} | {message}"
+
+def parse_recipients(raw: str) -> List[str]:
+    if not raw:
+        return []
+    parts = [p.strip() for p in raw.replace(";", ",").split(",")]
+    return [p for p in parts if p]
+
+
+def load_execution_summary(json_path: str):
+    if not os.path.exists(json_path):
+        return {}
     try:
-        print(line)
-    except UnicodeEncodeError:
-        print(line.encode("cp1252", errors="replace").decode("cp1252"))
-    LOG_FILE.parent.mkdir(exist_ok=True)
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(line + "\n")
+        with open(json_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
-# ---------------------------------------------------------------------------
-# 🧩 Validation
-# ---------------------------------------------------------------------------
-if not all([SMTP_HOST, SMTP_USER, SMTP_PASS, REPORT_TO]):
-    log("Missing SMTP configuration or recipient list.", "ERROR")
-    sys.exit(1)
 
-if not HTML_REPORT.exists() or not PDF_REPORT.exists():
-    log("Missing report files. Expected rtm_report.html and rtm_report.pdf.", "ERROR")
-    sys.exit(2)
+def build_message(subject: str, sender: str, to_addrs: List[str], html_body: str):
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = Header(subject, "utf-8")
+    msg["From"] = sender
+    msg["To"] = ", ".join(to_addrs)
 
-def parse_recipients(value: str):
-    return [r.strip() for r in value.split(",") if r.strip()]
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+    return msg
 
-to_list  = parse_recipients(REPORT_TO)
-cc_list  = parse_recipients(REPORT_CC)
-bcc_list = parse_recipients(REPORT_BCC)
-all_recipients = list({*to_list, *cc_list, *bcc_list})
 
-if not to_list:
-    log("Recipient TO list is empty.", "ERROR")
-    sys.exit(3)
+def attach_file(msg: MIMEMultipart, path: str, filename: str = None):
+    if not path or not os.path.exists(path):
+        print(f"[WARN] Attachment missing or path not found: {path}")
+        return
+    filename = filename or os.path.basename(path)
+    with open(path, "rb") as f:
+        part = MIMEApplication(f.read(), Name=filename)
+    part["Content-Disposition"] = f'attachment; filename="{filename}"'
+    msg.attach(part)
+    print(f"[INFO] Attached file: {filename}")
 
-# ---------------------------------------------------------------------------
-# 📨 Compose Email
-# ---------------------------------------------------------------------------
-def build_email() -> MIMEMultipart:
-    """Builds a MIME multipart email with HTML + PDF attachments."""
-    log("Composing RTM report email...")
 
-    subject = f"RTM Test Execution Report – {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    msg = MIMEMultipart("mixed")
-    msg["From"] = REPORT_FROM
-    msg["To"] = ", ".join(to_list)
-    if cc_list:
-        msg["Cc"] = ", ".join(cc_list)
-    msg["Subject"] = subject
+def build_html_body(data: dict) -> str:
+    project = data.get("projectKey", "")
+    execution = data.get("executionKey", "")
+    status = data.get("status", "UNKNOWN")
+    summary = data.get("summary", "")
+    fetched_at = data.get("fetchedAt", "")
+    total_tc = len(data.get("testCases", []) or data.get("issues", []))
 
-    # HTML Body
-    html_body = f"""
+    return f"""
     <html>
-    <body style="font-family:Arial, sans-serif; font-size:14px; color:#333;">
-        <p>Dear Team,</p>
-        <p>Please find attached the latest <b>RTM Test Execution Report</b>.</p>
-        <p>You can also view it on Confluence:<br>
-           🔗 <a href="{CONFLUENCE_LINK}" target="_blank">{CONFLUENCE_LINK}</a></p>
-        <p>Generated on: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
-        <p>Regards,<br><b>DevOps CI/CD Automation</b></p>
-    </body>
+      <body style="font-family: Arial, sans-serif; font-size: 13px;">
+        <h2>RTM Test Execution Report</h2>
+        <table cellpadding="4" cellspacing="0" border="0">
+          <tr><td><b>Project:</b></td><td>{project}</td></tr>
+          <tr><td><b>Execution:</b></td><td>{execution}</td></tr>
+          <tr><td><b>Status:</b></td><td>{status}</td></tr>
+          <tr><td><b>Summary:</b></td><td>{summary}</td></tr>
+          <tr><td><b>Generated at:</b></td><td>{fetched_at}</td></tr>
+          <tr><td><b>Total Test Cases:</b></td><td>{total_tc}</td></tr>
+        </table>
+
+        <p>
+          Please find the attached HTML/PDF report for detailed test case results.
+        </p>
+        <p>
+          Regards,<br/>
+          RTM Automation Pipeline
+        </p>
+      </body>
     </html>
     """
 
-    msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-    # Attach HTML Report
-    with open(HTML_REPORT, "rb") as f:
-        html_part = MIMEApplication(f.read(), _subtype="html")
-        html_part.add_header("Content-Disposition", "attachment", filename=HTML_REPORT.name)
-        msg.attach(html_part)
+def main():
+    smtp_host = env("SMTP_HOST", required=True)
+    smtp_port = int(env("SMTP_PORT", "587"))
+    smtp_user = env("SMTP_USER", required=True)
+    smtp_password = env("SMTP_PASSWORD", required=True)
+    smtp_use_tls = os.getenv("SMTP_USE_TLS", "true").lower() not in ("false", "0", "no")
 
-    # Attach PDF Report
-    with open(PDF_REPORT, "rb") as f:
-        pdf_part = MIMEApplication(f.read(), _subtype="pdf")
-        pdf_part.add_header("Content-Disposition", "attachment", filename=PDF_REPORT.name)
-        msg.attach(pdf_part)
+    sender = env("EMAIL_FROM", required=True)
+    to_raw = env("EMAIL_TO", required=True)
+    cc_raw = os.getenv("EMAIL_CC", "")
+    bcc_raw = os.getenv("EMAIL_BCC", "")
 
-    log(f"Email composed successfully → Subject: {subject}")
-    return msg
+    to_list = parse_recipients(to_raw)
+    cc_list = parse_recipients(cc_raw)
+    bcc_list = parse_recipients(bcc_raw)
 
-# ---------------------------------------------------------------------------
-# 📬 Send Email with retry
-# ---------------------------------------------------------------------------
-def send_email(msg: MIMEMultipart, retries: int = 3, delay_sec: int = 5) -> None:
-    """Send email via SMTP with retry for transient errors."""
-    for attempt in range(1, retries + 1):
-        try:
-            log(f"Attempt {attempt}: Connecting to SMTP server {SMTP_HOST}:{SMTP_PORT} as {SMTP_USER}...")
-            with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as server:
-                server.starttls()
-                server.login(SMTP_USER, SMTP_PASS)
-                server.sendmail(REPORT_FROM, all_recipients, msg.as_string())
-            log(f"✅ Email sent successfully to {len(all_recipients)} recipients.")
-            return
-        except smtplib.SMTPException as e:
-            log(f"⚠️  SMTP error on attempt {attempt}: {e}", "WARN")
-            if attempt < retries:
-                sleep(delay_sec)
-                continue
-            else:
-                log("❌ All retry attempts failed. Aborting email send.", "ERROR")
-                traceback.print_exc()
-                sys.exit(4)
-        except Exception as e:
-            log(f"❌ Unexpected error on attempt {attempt}: {e}", "ERROR")
-            traceback.print_exc()
-            if attempt < retries:
-                sleep(delay_sec)
-            else:
-                sys.exit(5)
+    if not to_list:
+        print("[ERROR] No valid recipients specified in EMAIL_TO.", file=sys.stderr)
+        sys.exit(2)
 
-# ---------------------------------------------------------------------------
-# 🏁 Main Entry
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    print("=" * 70)
-    print("📧 Starting RTM Email Notification Process")
-    print("=" * 70)
+    # Load execution summary for subject/body
+    json_path = os.getenv("RTM_OUTPUT_JSON", "data/rtm_execution.json")
+    data = load_execution_summary(json_path)
+
+    project = data.get("projectKey", "")
+    execution = data.get("executionKey", "")
+    status = data.get("status", "UNKNOWN")
+
+    subject = os.getenv(
+        "EMAIL_SUBJECT",
+        f"RTM Test Execution Report - {project}/{execution} [{status}]",
+    )
+
+    html_body = build_html_body(data)
+    msg = build_message(subject, sender, to_list + cc_list, html_body)
+
+    # Attach HTML + PDF
+    html_report = os.getenv("RTM_REPORT_HTML", "report/rtm_execution.html")
+    pdf_report = os.getenv("RTM_REPORT_PDF", "report/rtm_execution.pdf")
+
+    attach_file(msg, html_report)
+    attach_file(msg, pdf_report)
+
+    all_recipients = list(dict.fromkeys(to_list + cc_list + bcc_list))  # dedupe
+
+    print("=======================================================")
+    print("[INFO] Sending email notification")
+    print(f"[INFO]  SMTP Host : {smtp_host}:{smtp_port}")
+    print(f"[INFO]  From      : {sender}")
+    print(f"[INFO]  To        : {', '.join(to_list)}")
+    if cc_list:
+        print(f"[INFO]  Cc        : {', '.join(cc_list)}")
+    if bcc_list:
+        print(f"[INFO]  Bcc       : {', '.join(bcc_list)}")
+    print("=======================================================")
 
     try:
-        message = build_email()
-        send_email(message)
-        log("Email notification process completed successfully.")
-        sys.exit(0)
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as server:
+            server.ehlo()
+            if smtp_use_tls:
+                server.starttls()
+                server.ehlo()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(sender, all_recipients, msg.as_string())
+            print("[INFO] Email sent successfully.")
     except Exception as e:
-        log(f"Unhandled exception: {e}", "ERROR")
+        print(f"[ERROR] Failed to send email: {e}", file=sys.stderr)
         traceback.print_exc()
-        sys.exit(99)
+        sys.exit(6)
+
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

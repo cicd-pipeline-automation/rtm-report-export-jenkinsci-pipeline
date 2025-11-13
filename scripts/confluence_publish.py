@@ -1,183 +1,144 @@
 #!/usr/bin/env python3
-"""
-====================================================================================
-📘 Confluence Publisher – RTM Report Automation (Production-Ready)
-------------------------------------------------------------------------------------
-Uploads generated RTM HTML & PDF reports to a Confluence Cloud page.
+# ==========================================================
+# 📰 confluence_publish.py
+# Purpose: Publish RTM HTML report to Confluence (create or update page)
+# ==========================================================
 
-✅ Creates page if missing
-✅ Updates page content with version bump
-✅ Attaches latest HTML/PDF reports (replace if exists)
-✅ Safe for Jenkins CI/CD or standalone use
-✅ Handles transient network or API errors
-
-Author  : DevOpsUser8413
-Version : 1.1.0
-====================================================================================
-"""
-
+import json
 import os
 import sys
-import json
-import time
+from urllib.parse import quote
+
 import requests
-import traceback
-from pathlib import Path
-from datetime import datetime
 
-# ------------------------------------------------------------------------------
-# 🌍 Environment Variables (Injected by Jenkins)
-# ------------------------------------------------------------------------------
-CONFLUENCE_BASE   = os.getenv("CONFLUENCE_BASE")
-CONFLUENCE_USER   = os.getenv("CONFLUENCE_USER")
-CONFLUENCE_TOKEN  = os.getenv("CONFLUENCE_TOKEN")
-CONFLUENCE_SPACE  = os.getenv("CONFLUENCE_SPACE", "DEMO")
-CONFLUENCE_TITLE  = os.getenv("CONFLUENCE_TITLE", "RTM Test Execution Report")
 
-HTML_FILE = Path("report/rtm_report.html")
-PDF_FILE  = Path("report/rtm_report.pdf")
-LOG_FILE  = Path("report/confluence_publish_log.txt")
+def env(name, default=None, required=False):
+    value = os.getenv(name, default)
+    if required and (value is None or str(value).strip() == ""):
+        print(f"[ERROR] Missing required environment variable: {name}", file=sys.stderr)
+        sys.exit(2)
+    return value
 
-# ------------------------------------------------------------------------------
-# 🧾 Logging Utility
-# ------------------------------------------------------------------------------
-def log(message: str, level: str = "INFO") -> None:
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    line = f"[{level}] {ts} | {message}"
-    try:
-        print(line)
-    except UnicodeEncodeError:
-        print(line.encode("cp1252", errors="replace").decode("cp1252"))
-    LOG_FILE.parent.mkdir(exist_ok=True)
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(line + "\n")
 
-# ------------------------------------------------------------------------------
-# 🧱 Validation
-# ------------------------------------------------------------------------------
-if not all([CONFLUENCE_BASE, CONFLUENCE_USER, CONFLUENCE_TOKEN]):
-    log("Missing Confluence credentials or base URL.", "ERROR")
-    sys.exit(1)
+def load_html(path):
+    if not os.path.exists(path):
+        print(f"[ERROR] HTML report not found: {path}", file=sys.stderr)
+        sys.exit(4)
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
 
-if not HTML_FILE.exists() or not PDF_FILE.exists():
-    log("Missing report files. Expected rtm_report.html and rtm_report.pdf.", "ERROR")
-    sys.exit(2)
 
-# ------------------------------------------------------------------------------
-# 🔐 Authentication Setup
-# ------------------------------------------------------------------------------
-auth = (CONFLUENCE_USER, CONFLUENCE_TOKEN)
-common_headers = {"Content-Type": "application/json"}
+def get_existing_page_id(base_url, space_key, title, auth, verify_ssl):
+    url = f"{base_url}/rest/api/content?spaceKey={quote(space_key)}&title={quote(title)}&expand=version"
+    resp = requests.get(url, auth=auth, verify=verify_ssl)
+    if resp.status_code != 200:
+        print(f"[WARN] Failed to search for existing Confluence page (HTTP {resp.status_code})")
+        return None, None
 
-# ------------------------------------------------------------------------------
-# 🧰 HTTP Request Helper with Retry
-# ------------------------------------------------------------------------------
-def safe_request(method: str, url: str, **kwargs):
-    for attempt in range(1, 4):
-        try:
-            resp = requests.request(method, url, auth=auth, timeout=30, **kwargs)
-            if resp.status_code in [200, 201]:
-                return resp
-            log(f"⚠️ Attempt {attempt} failed ({resp.status_code}): {resp.text[:200]}")
-        except requests.RequestException as e:
-            log(f"⚠️ Attempt {attempt} request error: {e}", "WARN")
-        if attempt < 3:
-            time.sleep(3)
-    log(f"❌ All attempts failed for {url}", "ERROR")
-    sys.exit(99)
+    data = resp.json()
+    results = data.get("results", [])
+    if not results:
+        return None, None
 
-# ------------------------------------------------------------------------------
-# 🔍 Find Existing Page
-# ------------------------------------------------------------------------------
-def find_page():
-    url = f"{CONFLUENCE_BASE}/rest/api/content"
-    params = {"title": CONFLUENCE_TITLE, "spaceKey": CONFLUENCE_SPACE, "expand": "version"}
-    resp = safe_request("GET", url, params=params)
-    results = resp.json().get("results", [])
-    return results[0] if results else None
+    page = results[0]
+    return page.get("id"), page.get("version", {}).get("number")
 
-# ------------------------------------------------------------------------------
-# 📝 Create or Update Page
-# ------------------------------------------------------------------------------
-def create_or_update_page(existing_page: dict):
-    with open(HTML_FILE, "r", encoding="utf-8") as f:
-        html_content = f.read()
 
+def create_page(base_url, space_key, title, parent_id, html, auth, verify_ssl):
+    url = f"{base_url}/rest/api/content"
     payload = {
         "type": "page",
-        "title": CONFLUENCE_TITLE,
-        "space": {"key": CONFLUENCE_SPACE},
-        "body": {"storage": {"value": html_content, "representation": "storage"}},
+        "title": title,
+        "space": {"key": space_key},
+        "body": {
+            "storage": {
+                "value": html,
+                "representation": "storage",
+            }
+        },
     }
+    if parent_id:
+        payload["ancestors"] = [{"id": parent_id}]
 
-    if not existing_page:
-        log(f"Creating new Confluence page '{CONFLUENCE_TITLE}' in space '{CONFLUENCE_SPACE}'...")
-        url = f"{CONFLUENCE_BASE}/rest/api/content"
-        resp = safe_request("POST", url, headers=common_headers, json=payload)
-        log("✅ Page created successfully.")
-        return resp.json()
+    resp = requests.post(
+        url,
+        auth=auth,
+        json=payload,
+        headers={"Content-Type": "application/json"},
+        verify=verify_ssl,
+    )
+    if not (200 <= resp.status_code < 300):
+        print(f"[ERROR] Failed to create Confluence page (HTTP {resp.status_code}): {resp.text}", file=sys.stderr)
+        sys.exit(5)
+
+    data = resp.json()
+    print(f"[INFO] Created Confluence page: {data.get('id')}")
+    return data.get("id")
+
+
+def update_page(base_url, page_id, current_version, title, html, auth, verify_ssl):
+    url = f"{base_url}/rest/api/content/{page_id}"
+    new_version = (current_version or 0) + 1
+    payload = {
+        "id": page_id,
+        "type": "page",
+        "title": title,
+        "version": {"number": new_version},
+        "body": {
+            "storage": {
+                "value": html,
+                "representation": "storage",
+            }
+        },
+    }
+    resp = requests.put(
+        url,
+        auth=auth,
+        json=payload,
+        headers={"Content-Type": "application/json"},
+        verify=verify_ssl,
+    )
+    if not (200 <= resp.status_code < 300):
+        print(f"[ERROR] Failed to update Confluence page (HTTP {resp.status_code}): {resp.text}", file=sys.stderr)
+        sys.exit(5)
+
+    data = resp.json()
+    print(f"[INFO] Updated Confluence page: {data.get('id')} (version {new_version})")
+    return data.get("id")
+
+
+def main():
+    base_url = env("CONFLUENCE_BASE_URL", required=True).rstrip("/")
+    user = env("CONFLUENCE_USER", required=True)
+    token = env("CONFLUENCE_TOKEN", required=True)
+    space = env("CONFLUENCE_SPACE", required=True)
+    title = env("CONFLUENCE_TITLE", "RTM Test Execution Report")
+    parent_id = env("CONFLUENCE_PARENT_ID", "")
+    html_path = env("RTM_REPORT_HTML") or "report/rtm_execution.html"
+    verify_ssl = os.getenv("CONFLUENCE_VERIFY_SSL", "true").lower() not in ("false", "0", "no")
+
+    auth = (user, token)
+    html = load_html(html_path)
+
+    print("=======================================================")
+    print("[INFO] Publishing report to Confluence")
+    print(f"[INFO]  Base URL : {base_url}")
+    print(f"[INFO]  Space    : {space}")
+    print(f"[INFO]  Title    : {title}")
+    print("=======================================================")
+
+    page_id, current_version = get_existing_page_id(base_url, space, title, auth, verify_ssl)
+
+    if page_id:
+        print(f"[INFO] Existing page found: {page_id} (version={current_version}) – updating.")
+        update_page(base_url, page_id, current_version, title, html, auth, verify_ssl)
     else:
-        page_id = existing_page["id"]
-        version = existing_page.get("version", {}).get("number", 1) + 1
-        payload["version"] = {"number": version}
-        log(f"Updating Confluence page '{CONFLUENCE_TITLE}' → version {version}...")
-        url = f"{CONFLUENCE_BASE}/rest/api/content/{page_id}"
-        resp = safe_request("PUT", url, headers=common_headers, json=payload)
-        log("✅ Page updated successfully.")
-        return resp.json()
+        print("[INFO] No existing page found – creating new page.")
+        create_page(base_url, space, title, parent_id, html, auth, verify_ssl)
 
-# ------------------------------------------------------------------------------
-# 📎 Upload Attachments
-# ------------------------------------------------------------------------------
-def upload_attachment(page_id: str, file_path: Path):
-    upload_url = f"{CONFLUENCE_BASE}/rest/api/content/{page_id}/child/attachment"
-    headers = {"X-Atlassian-Token": "no-check"}
-    file_name = file_path.name
+    print("[INFO] Confluence publish completed.")
+    sys.exit(0)
 
-    log(f"Attaching '{file_name}' to page ID {page_id}...")
 
-    # check if attachment already exists
-    resp = safe_request("GET", upload_url)
-    attachments = resp.json().get("results", [])
-    existing = next((a for a in attachments if a["title"] == file_name), None)
-
-    with open(file_path, "rb") as f:
-        files = {"file": (file_name, f, "application/octet-stream")}
-        if existing:
-            attach_id = existing["id"]
-            log(f"Updating existing attachment: {file_name}")
-            url = f"{upload_url}/{attach_id}/data"
-        else:
-            log(f"Uploading new attachment: {file_name}")
-            url = upload_url
-        resp = safe_request("POST", url, headers=headers, files=files)
-
-    if resp.status_code in [200, 201]:
-        log(f"✅ Attachment '{file_name}' uploaded successfully.")
-    else:
-        log(f"❌ Failed to upload '{file_name}': {resp.status_code}", "ERROR")
-        sys.exit(6)
-
-# ------------------------------------------------------------------------------
-# 🏁 Main Execution
-# ------------------------------------------------------------------------------
 if __name__ == "__main__":
-    print("=" * 70)
-    print("🌐 Starting Confluence Publishing Process")
-    print("=" * 70)
-    try:
-        page = find_page()
-        page_data = create_or_update_page(page)
-        page_id = page_data["id"]
-
-        upload_attachment(page_id, HTML_FILE)
-        upload_attachment(page_id, PDF_FILE)
-
-        confluence_url = f"{CONFLUENCE_BASE}/pages/{page_id}"
-        log(f"✅ Confluence publishing completed successfully → {confluence_url}")
-        print(f"[SUCCESS] Report published at: {confluence_url}")
-        sys.exit(0)
-    except Exception as e:
-        log(f"❌ Unexpected failure: {e}", "ERROR")
-        traceback.print_exc()
-        sys.exit(99)
+    main()
